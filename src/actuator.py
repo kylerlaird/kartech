@@ -24,9 +24,9 @@ class ActuatorCommand:
     def __init__(self, cmd, data_type, confirmation, auto_reply):
         self.__cmd = array('B', [cmd, data_type, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0])
         if confirmation:
-            self.__cmd[1] |= 0x1
+            self.__cmd[1] |= 0x80
         if auto_reply:
-            self.__cmd[1] |= 0x2
+            self.__cmd[1] |= 0x40
 
     @classmethod
     def CreateCommand(cmd, data_type, confirmation, auto_reply):
@@ -58,15 +58,15 @@ class SoftwareRevisionReport(ActuatorCommand):
     Byte1: DT - Data Type - will be set to 65 (0x41).
     Bytes 2 thru 4: SW VER – These bytes show the software version.
     Byte 5: SW DAY – This is the day the software was written.
-    Bytes 6 & 7: SW YEAR/MONTH - This is the month and year the software was written.
+    Bytes 6 & 7: SW YEAR/MONTH - This is the month and year the60 software was written.
     """
 
     def __init__(self, frame):
         super(SoftwareRevisionReport, self).__init__(frame.frame_data[0], frame.frame_data[1], False, False)
         if self.FrameData(0) != 0xEF:
             raise ValueError("Wrong frame byte 0")
-        if self.FrameData(1) != 0x41:
-            raise ValueError("Wrong frame byte 1")
+#        if self.FrameData(1) != 0x41:
+#            raise ValueError("Wrong frame byte 1")
 
         self.SetFrameByte(2, frame.frame_data[2])
         self.SetFrameByte(3, frame.frame_data[3])
@@ -88,11 +88,11 @@ class SoftwareRevisionReport(ActuatorCommand):
     def SwDay(self):
         return self.FrameData(5)
 
-    def SwYear(self):
-        return self.FrameData(6)
+    def SwMonth(self):
+        return self.FrameData(6) & 0x0f
 
     def SwYear(self):
-        return self.FrameData(7)
+        return ((self.FrameData(7) & 0xff) << 4) +  ((self.FrameData(6) & 0xf0) >> 4)
     
 
 class UniqueDeviceIDReport(ActuatorCommand):
@@ -168,6 +168,8 @@ class Actuator:
         self.OnFrameReceiving = None
         self.OnFrameSending = None
 
+        self.ignore = []
+
     def __reg_frame_desc(self, frame_id, name, frame_data):
         frame_def = can.CanFrameDefinition(frame_id, name=name, dlc = len(frame_data))
         frame_def.producer_ids = ["1"]
@@ -226,6 +228,8 @@ class Actuator:
 
     def __ReadResp(self, orig, shouldBeConfirmed):
         frame = self.__recvFrame()
+        if frame.frame_id in self.ignore: #Echo, add filtering by canid
+            frame = self.__recvFrame()
         if shouldBeConfirmed:
             # check that data is the same as request
             if frame.frame_data[0] != orig.FrameData(0):
@@ -237,10 +241,16 @@ class Actuator:
 
     def __ReadConfirm(self, orig):
         frame = self.__recvFrame()
+        if frame.frame_id in self.ignore: #Echo, add filtering by canid
+            frame = self.__recvFrame()
+
         # check that data is the same as request
         if frame.frame_data[0] != orig.FrameData(0):
             # wrong frame
             raise UnexpectedResponse("Expecting %s but received %s command" % (str(orig.FrameData(0)), str(frame.frame_data[0])))
+
+    def Ignore(self, frameId):
+        self.ignore.append(frameId)
 
     def IsRcvBus(self):
         return self.bus_rcv is not None;
