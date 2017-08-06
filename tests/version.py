@@ -11,7 +11,7 @@ def OnFrameReceiving(frame):
     print("<- [%s]: %s" % (hex(frame.frame_id), binascii.hexlify(frame.frame_data).decode()))
 
 
-act = actuator.Actuator("vcan0")
+act = actuator.Actuator("can0")
 act.Ignore(0x00FF0000)
 try:
     act.StartSendingBus(3, OnFrameSending)
