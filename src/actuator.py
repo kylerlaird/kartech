@@ -74,12 +74,13 @@ class SoftwareRevisionReport(ActuatorCommand):
         
     def SoftwareVersion(self):
         a = 0
-        a += self.FrameData(2)
+
         a <<= 8
         a += self.FrameData(3)
         a <<= 8
         a += self.FrameData(4)
-        return a
+        return "%s.%s" % (str(self.FrameData(2)), str(a))
+
     
     def SwDay(self):
         return self.FrameData(5)
@@ -245,6 +246,9 @@ class Actuator:
         while self.working:
             try:
                 frame = self.__recvFrame()
+                if frame is None:
+                    print("Lost connection...")
+                    break
                 self.working = dataReceiver.OnFrameRecieved(frame)
             except can.exceptions.CanTimeoutException as t:
                 print("Got timeout: %s" % str(t))
@@ -267,13 +271,14 @@ class Actuator:
         self.OnFrameReceiving = OnFrameReceiving
         self.__startRcvBus(timeout)
 
-    def StopSendingBus(self):
+    def StopReceivingBus(self):
         self.__stopRcvBus()
         self.OnFrameReceiving = None
 
     def SoftwareVersionData(self, confirmation = True, waitResponse = False):
         cmd = ActuatorCommand(0x7f, 0x41, confirmation, False)
         cmd.SetFrameByte(2, 0x01)
+
         self.__sendFrame(self.device_id, cmd)
         ret = None
         if waitResponse:
