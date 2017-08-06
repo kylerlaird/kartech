@@ -1,9 +1,12 @@
 #!/usr/bin/python
 import os
+import socket
 from array import array
 
 import can4python as can
 
+class UnexpectedResponse(Exception):
+    pass
 
 class DataReceiver:
     def OnFrameRecieved(self, frame):
@@ -227,9 +230,17 @@ class Actuator:
             # check that data is the same as request
             if frame.frame_data[0] != orig.FrameData(0):
                 # wrong frame
-                return None
+                raise UnexpectedResponse("Expecting %s but received %s command" % (str(orig.FrameData(0)), str(frame.frame_data[0])))
+
             frame = self.__recvFrame()
         return frame
+
+    def __ReadConfirm(self, orig):
+        frame = self.__recvFrame()
+        # check that data is the same as request
+        if frame.frame_data[0] != orig.FrameData(0):
+            # wrong frame
+            raise UnexpectedResponse("Expecting %s but received %s command" % (str(orig.FrameData(0)), str(frame.frame_data[0])))
 
     def IsRcvBus(self):
         return self.bus_rcv is not None;
@@ -251,10 +262,10 @@ class Actuator:
                     break
                 self.working = dataReceiver.OnFrameRecieved(frame)
             except can.exceptions.CanTimeoutException as t:
-                print("Got timeout: %s" % str(t))
+#                print("Got timeout: %s" % str(t))
                 self.working  = dataReceiver.OnFrameTimeout(t)
             except Exception as e:
-                print("Receiving: Got error, %s" % str(e))
+#                print("Receiving: Got error, %s" % str(e))
                 self.working = dataReceiver.OnFrameError(e)
             
         self.__stopRcvBus()
@@ -299,3 +310,93 @@ class Actuator:
                 ret = UniqueDeviceIDReport(frame)
 
         return ret
+
+    def Reset(self, resetType, resetTypeExt, confirmation = True, waitResponse = False):
+        """
+        RESET TYPE - This value determines which type of reset is to be done.
+        0x0001 = Reset Outputs. All outputs are turned off.
+        0x0002 = Reset User Defined IDs.
+        0x0004 = Reset Report Rates.
+        0x0008 = Reset Hardware Configurations.
+        0x0010 = Reset User Configurations (KP, KI, KD, ...).
+        0xFFFF = Reset everything.
+        RESET TYPE EXTENTION 1 – This parameter further defines some
+        resets. Setting the bit to 1, activates the specific Reset. Clearing the
+        bit leaves that parameter untouched.
+        Bit 0: Reset User Defined Report ID
+        Bit 1: Reset User Defined Command ID #1
+        Bit 2: Reset User Defined Command ID #2
+        Bit 3: Reset User Defined Command ID #3
+        Bit 4: Reset User Defined Command ID #4
+        Bit 13: Reset RPSEL.
+        Bit 14: Reset DISDEF.
+
+        all data for this command are in host order
+        """
+
+        cmd = ActuatorCommand(0xF9, 0x0, confirmation, False)
+
+        if resetType is None and resetTypeExt is None:
+            raise ValueError("resetType and resetTypeExt cannot be None")
+
+        if resetType is not None:
+            netorder = socket.htons(resetType)
+
+            lo = netorder & 0xff
+            hi = (netorder >> 8 ) & 0xff
+
+            cmd.SetFrameByte(2, hi)
+            cmd.SetFrameByte(3, lo)
+
+        if resetTypeExt is not None:
+            netorder = socket.htons(resetTypeExt)
+
+            lo = netorder & 0xff
+            hi = (netorder >> 8 ) & 0xff
+
+            cmd.SetFrameByte(4, hi)
+            cmd.SetFrameByte(5, lo)
+
+        self.__sendFrame(self.device_id, cmd)
+
+        if waitResponse and confirmation:
+            self.__ReadConfirm(cmd)
+
+        return None
+
+    def PWMFrequency(self, pwmMin, pwmMax, pwmFreq, confirmation = True, waitResponse = False):
+        cmd = ActuatorCommand(0xF5, 0x01, confirmation, False)
+
+        cmd.SetFrameByte(3, 0x2)
+
+        if pwmMin is None:
+            pwmMin = 0
+
+        if pwmMin > 100:
+            raise ValueError("pwmMin too big")
+
+        cmd.SetFrameByte(4, pwmMin)
+
+        if pwmMax is None:
+            pwmMax = 100
+
+        if pwmMax > 100:
+            raise ValueError("pwmMan too big")
+
+        cmd.SetFrameByte(5, pwmMax)
+
+        if pwmFreq is not None:
+            netorder = socket.htons(pwmFreq)
+
+            lo = netorder & 0xff
+            hi = (netorder >> 8 ) & 0xff
+
+            cmd.SetFrameByte(6, hi)
+            cmd.SetFrameByte(7, lo)
+
+        self.__sendFrame(self.device_id, cmd)
+
+        if waitResponse and confirmation:
+            self.__ReadConfirm(cmd)
+
+        return None
